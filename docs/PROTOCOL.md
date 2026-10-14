@@ -90,6 +90,33 @@ is answered with a fixed error:
 — the firmware simply does not accept the classic handshake.  The official app never
 sends the classic key either; its capture only contains the `0x0082` ECDH exchange.
 
+## Vibrate / "find device" (endpoint `0x0032`)
+
+The official app's 查找设备 ("find device") does **not** use the classic
+Immediate Alert characteristic (`0x2A06` / service `0x1802`) on this firmware —
+writes there are accepted but ignored.  It uses an unencrypted 1-byte chunked
+message on its own 2021 endpoint:
+
+```
+host ->  0x0032: 01        capabilities request
+dev  ->  0x0032: 02 01
+host ->  0x0032: 03        start vibrating   <-- the band buzzes here
+dev  ->  0x0032: 04 ...
+host ->  0x0032: 05        stop vibrating
+dev  ->  0x0032: 06 ...
+```
+
+Captured from the app with an HCI snoop while tapping 查找设备.
+`miband2021.protocol.MiBand2021.vibrate()` implements exactly this.
+
+## macOS scanning gotcha
+
+`CoreBluetooth` starts scans without `CBCentralManagerScanOptionAllowDuplicatesKey`.
+Once the system has seen/connected a peripheral, such a scan can stop reporting it
+even though it is still advertising — the device "disappears" until the Mac's
+Bluetooth is toggled off/on.  `miband2021/macos_scan.py` patches bleak to enable
+allow-duplicates, which brings the device back **without touching the radio**.
+
 ## References
 
 * Gadgetbridge: `ECDH_B163`, `Huami2021ChunkedEncoder/Decoder`, `InitOperation2021`,

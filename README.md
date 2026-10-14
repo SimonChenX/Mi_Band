@@ -86,9 +86,17 @@ python -m miband2021 --address AA:BB:CC:DD:EE:FF --key-hex 00112233... --info
 
 # or via the environment
 MI_BAND_AUTH_KEY=00112233445566778899aabbccddeeff python -m miband2021 --info
+
+# make the band vibrate for 5 seconds ("find device")
+python -m miband2021 --key-file auth_key.txt --vibrate --vibrate-seconds 5
 ```
 
 `MI_BAND_DEBUG=1` prints the raw chunk traffic.
+
+> **macOS scanning note**: CoreBluetooth normally stops reporting a peripheral once
+> the system has seen it (it "disappears" until you toggle Bluetooth).  The client
+> works around this automatically by enabling the *allow duplicates* scan option,
+> so no manual Bluetooth toggling or device reboots are needed.
 
 ## Tests
 
@@ -110,7 +118,8 @@ miband2021/
   ecdh_b163.py   GF(2^163) + NIST B-163 ECDH
   crypto.py      AES-ECB, CRC-32, MTU helpers
   chunked.py     Huami 2021 chunked encoder/decoder
-  protocol.py    BLE connection + 2021 authentication + reads
+  protocol.py    BLE connection + 2021 authentication + reads + vibrate
+  macos_scan.py  CoreBluetooth allow-duplicates workaround (macOS)
   cli.py         command line entry point
 docs/PROTOCOL.md protocol notes
 tests/           self tests

@@ -20,6 +20,7 @@ from bleak import BleakClient, BleakScanner
 from .chunked import ChunkedDecoder, ChunkedEncoder
 from .crypto import aes_ecb_encrypt
 from .ecdh_b163 import generate_public, generate_shared
+from .macos_scan import enable_allow_duplicates
 
 # Huami 2021 characteristics
 CHUNKED2021_WRITE = "00000016-0000-3512-2118-0009af100700"
@@ -37,6 +38,11 @@ DEVICE_INFO_CHARS = {
 }
 
 AUTH_ENDPOINT = 0x0082
+# 2021 "find device" endpoint (captured from the official app):
+#   0x01 -> capabilities, 0x03 -> start vibrating, 0x05 -> stop
+FIND_DEVICE_ENDPOINT = 0x0032
+FIND_DEVICE_START = 0x03
+FIND_DEVICE_STOP = 0x05
 
 
 class AuthError(Exception):
@@ -57,6 +63,9 @@ class MiBand2021:
 
     # -- discovery -----------------------------------------------------------
     async def discover(self, timeout: float = 25.0) -> str:
+        # On macOS the scan silently stops reporting devices it has seen before;
+        # allow-duplicates fixes that without toggling the Bluetooth radio.
+        enable_allow_duplicates()
         found = {}
 
         def cb(dev, adv):
@@ -180,14 +189,24 @@ class MiBand2021:
     async def vibrate(self, seconds: float = 2.0, repeats: int = 1):
         """Make the band vibrate ("find device").
 
-        Writes ALERT_LEVEL=3 (vibrate only) and then ALERT_LEVEL=0 (none) to
-        stop, exactly like Gadgetbridge's find-device command.
+        Uses the Huami 2021 endpoint 0x0032 (0x03 = start, 0x05 = stop),
+        captured from the official app.  Requires an authenticated session.
         """
         for _ in range(max(1, repeats)):
-            await self._write(ALERT_LEVEL, bytes([0x03]))
+            await self._write_chunks(self.encoder.write(
+                FIND_DEVICE_ENDPOINT, bytes([FIND_DEVICE_START]),
+                extended_flags=True, encrypt=False))
             await asyncio.sleep(seconds)
-            await self._write(ALERT_LEVEL, bytes([0x00]))
+            await self._write_chunks(self.encoder.write(
+                FIND_DEVICE_ENDPOINT, bytes([FIND_DEVICE_STOP]),
+                extended_flags=True, encrypt=False))
             await asyncio.sleep(0.3)
+
+    async def vibrate_classic(self, seconds: float = 2.0):
+        """Legacy ALERT_LEVEL (0x2A06) vibration — ignored by Mi Band 6 firmware."""
+        await self._write(ALERT_LEVEL, bytes([0x03]))
+        await asyncio.sleep(seconds)
+        await self._write(ALERT_LEVEL, bytes([0x00]))
 
     async def read_device_info(self):
         info = {}
