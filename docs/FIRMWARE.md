@@ -43,6 +43,19 @@ python tools/fw_analyze.py PANGU_1.0.6.10.fw refs 0x16feba
 python tools/fw_analyze.py PANGU_1.0.6.10.fw func 0xcbf8
 ```
 
+Tip: linear disassembly of the whole image desyncs on inlined data.  To find
+callers reliably, decode **one instruction per 2-byte aligned position** with
+capstone and check for `bl`/`blx` (a plain linear sweep misses most calls):
+
+```python
+import capstone
+md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+for a in range(0x2c0, 0x16e000, 2):
+    ins = next(md.disasm(data[a + 0x400:a + 0x404], a), None)
+    if ins and ins.mnemonic in ("bl", "blx"):
+        target = int(ins.op_str.lstrip("#"), 16)
+```
+
 ## The ECF command framework
 
 The firmware has an "ECF" command dispatcher (function at `0xc8e0`) that switches
@@ -84,6 +97,30 @@ motor_enable          (string ref @0x13bc8)
 motor_set_internal    (string ref @0x13bc8+)
 motor_set_custom      (string ref @0x13e80)
 ```
+
+## Call chain for ECF commands
+
+The ECF dispatcher is reachable from the BLE command path:
+
+```
+OPCM message receiver        0x140e8   (logs "[OPCM]receiv sz: %d %d")
+  -> group dispatcher        0x14374   (tbb jump table on (field & 0x3f), 0..9)
+       case 2 ->                     ECF dispatcher
+  -> ECF dispatcher          0xc8e0    (switch on payload[0])
+       case 0x20 ->                  ecf_set_custom_motor
+       case 0x28 ->                  ecf_set_ad_reminder_data
+       ...
+```
+
+`0x140e8` is not called directly — its Thumb pointer is stored in a callback
+struct built around `0x14260` and registered with the data layer.  Right next to
+it live the `0x0090` (2021 endpoint `0x90`) send helpers (`0x51850`, `0x51648`),
+and the app's `0x0090` traffic is *encrypted* (see `docs/PROTOCOL.md`).
+
+**Conclusion / hypothesis**: ECF commands travel on the **encrypted 2021 endpoint
+`0x0090`** inside an "OPCM" envelope whose header carries the group index
+(`ECF = 2`); the message body is what the ECF dispatcher sees as `payload`.
+After authentication we hold the session key, so we can build these messages.
 
 ## Observation: find device ACKs but does not vibrate
 
