@@ -3,6 +3,19 @@
 Reverse-engineering notes for the Xiaomi Mi Band 6 (Chinese NFC, `hmpace.motion.v6nfc`)
 firmware, gathered to understand the "find device" / vibration handling.
 
+## TL;DR
+
+* The `2021` find-device command (endpoint `0x0032`, `0x03`/`0x05`, see
+  `docs/PROTOCOL.md`) is **acknowledged by the band but does not vibrate**.
+* The motor is actually driven through the firmware's **ECF command framework**:
+  ECF command `0x20` (`ecf_set_custom_motor`) plays built-in motor patterns or
+  stores a custom waveform.
+* ECF rides the **encrypted 2021 endpoint `0x0090`** inside a small "OPCM"
+  envelope (`byte0=type, byte1, byte2, byte3`, body from byte4; group =
+  `byte2 & 0x3f`, ECF = 2).
+* We can build those messages ourselves (we hold the session key after auth) -
+  see the TODO at the bottom.
+
 ## Obtaining the firmware
 
 Version list: <https://schakal.ru/fw/all_versions.json>
@@ -104,23 +117,67 @@ The ECF dispatcher is reachable from the BLE command path:
 
 ```
 OPCM message receiver        0x140e8   (logs "[OPCM]receiv sz: %d %d")
-  -> group dispatcher        0x14374   (tbb jump table on (field & 0x3f), 0..9)
-       case 2 ->                     ECF dispatcher
+  -> group dispatcher        0x14374   (tbb jump table on group, 0..9)
+       group 2 ->                   ECF dispatcher
   -> ECF dispatcher          0xc8e0    (switch on payload[0])
-       case 0x20 ->                  ecf_set_custom_motor
-       case 0x28 ->                  ecf_set_ad_reminder_data
+       case 0x20 ->                ecf_set_custom_motor
+       case 0x28 ->                ecf_set_ad_reminder_data
        ...
 ```
 
-`0x140e8` is not called directly — its Thumb pointer is stored in a callback
-struct built around `0x14260` and registered with the data layer.  Right next to
-it live the `0x0090` (2021 endpoint `0x90`) send helpers (`0x51850`, `0x51648`),
-and the app's `0x0090` traffic is *encrypted* (see `docs/PROTOCOL.md`).
+### Transport: encrypted 2021 endpoint `0x0090`
 
-**Conclusion / hypothesis**: ECF commands travel on the **encrypted 2021 endpoint
-`0x0090`** inside an "OPCM" envelope whose header carries the group index
-(`ECF = 2`); the message body is what the ECF dispatcher sees as `payload`.
-After authentication we hold the session key, so we can build these messages.
+The OPCM receiver is registered by a struct built at `0x14238`; its **first
+field is the uint16 `0x0090`** (`movs r3,#0x90; strh r3,[sp]`), and the callback
+list holds `0x1404c`, `0x1401c`, `0x14020` and our receiver `0x140e8`.  It sits
+right next to the `0x0090` send helpers (`0x51850`, `0x51648`).  Combined with
+the fact that the app's `0x0090` traffic is encrypted, ECF commands ride the
+**encrypted 2021 endpoint `0x0090`**.
+
+### OPCM envelope (4-byte header)
+
+The receiver parses the message one byte at a time (`0xdfbc8` = init,
+`0xdfc0e` = next byte):
+
+```
+byte0   message type    only 0 reaches the group dispatch (1 and 3 go elsewhere)
+byte1   field 1
+byte2   field 2         group = field2 & 0x3f      (ECF = 2)
+byte3   field 3
+byte4.. body            handed to the group handler; the ECF dispatcher sees
+                        this as `payload`, so payload[0] is the ECF command
+```
+
+So an ECF custom-motor message would look like:
+
+```
+00 ?? 02 ??  20 <slot> <flags> <waveform...>
+```
+
+The exact meaning of fields 1/3 is still unknown (to be determined by testing).
+
+### Motor entry points
+
+```
+0x13cf8 / 0x13d34   play a pattern with preset timing (r0..r3, extra on stack)
+0x13c30             the actual motor layer they funnel into
+0x13d84             motor_set_custom - called with &slotbuf for a stored waveform
+```
+
+With `flags = 0x80` (custom bit only) the handler jumps through a `tbb` table on
+`payload[1]` (0..8) and calls one of the built-in patterns; with
+`flags = 0xC0` (flag+custom) it stores the supplied waveform and hands it to
+`0x13d84`.
+
+## Next session: TODO
+
+1. Send ECF `0x20` on the encrypted `0x0090` channel and find a payload that
+   makes the band vibrate (start with the envelope above; try `flags=0x80` +
+   built-in pattern index, then `flags=0xC0` + a short waveform).
+2. Statically dig into the `0x0032` (find-device) handler to see whether it
+   plays a motor-pattern slot or only sets a flag - this explains why the
+   command is acknowledged but silent.
+3. Determine OPCM fields 1/3 (and whether type must be 0).
 
 ## Observation: find device ACKs but does not vibrate
 
