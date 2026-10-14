@@ -186,21 +186,31 @@ class MiBand2021:
         except Exception:
             await self.client.write_gatt_char(uuid, data, response=True)
 
-    async def vibrate(self, seconds: float = 2.0, repeats: int = 1):
-        """Make the band vibrate ("find device").
+    async def vibrate(self, seconds: float = 5.0, interval: float = 0.5):
+        """Make the band vibrate for ``seconds``.
 
         Uses the Huami 2021 endpoint 0x0032 (0x03 = start, 0x05 = stop),
-        captured from the official app.  Requires an authenticated session.
+        captured from the official app.  This firmware does not support
+        continuous find-device, so the start command has to be re-sent
+        periodically (Gadgetbridge does the same) -- a single 0x03 only buzzes
+        very briefly.
         """
-        for _ in range(max(1, repeats)):
+        # capabilities request; the device answers with 0x02
+        await self._write_chunks(self.encoder.write(
+            FIND_DEVICE_ENDPOINT, bytes([0x01]), extended_flags=True, encrypt=False))
+        await asyncio.sleep(0.3)
+
+        deadline = asyncio.get_event_loop().time() + seconds
+        while asyncio.get_event_loop().time() < deadline:
             await self._write_chunks(self.encoder.write(
                 FIND_DEVICE_ENDPOINT, bytes([FIND_DEVICE_START]),
                 extended_flags=True, encrypt=False))
-            await asyncio.sleep(seconds)
-            await self._write_chunks(self.encoder.write(
-                FIND_DEVICE_ENDPOINT, bytes([FIND_DEVICE_STOP]),
-                extended_flags=True, encrypt=False))
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(interval)
+
+        await self._write_chunks(self.encoder.write(
+            FIND_DEVICE_ENDPOINT, bytes([FIND_DEVICE_STOP]),
+            extended_flags=True, encrypt=False))
+        await asyncio.sleep(0.3)
 
     async def vibrate_classic(self, seconds: float = 2.0):
         """Legacy ALERT_LEVEL (0x2A06) vibration — ignored by Mi Band 6 firmware."""
