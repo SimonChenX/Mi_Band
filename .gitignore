@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+auth_key.txt
+.venv/
+venv/
+.uv/

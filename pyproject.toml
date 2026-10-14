@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "miband2021"
+version = "0.1.0"
+description = "Talk to Xiaomi bands/watches that use the Huami 2021 BLE protocol (ECDH B-163 auth)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "AGPL-3.0-or-later" }
+dependencies = [
+    "bleak>=0.20",
+    "pycryptodome>=3.15",
+]
+
+[project.scripts]
+miband2021 = "miband2021.cli:main"
+
+[tool.setuptools]
+packages = ["miband2021"]
