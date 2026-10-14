@@ -26,6 +26,7 @@ CHUNKED2021_WRITE = "00000016-0000-3512-2118-0009af100700"
 CHUNKED2021_READ = "00000017-0000-3512-2118-0009af100700"
 # classic characteristics
 BATTERY = "00000006-0000-3512-2118-0009af100700"
+ALERT_LEVEL = "00002a06-0000-1000-8000-00805f9b34fb"  # Alert Notification Service
 DEVICE_INFO = "0000180a-0000-1000-8000-00805f9b34fb"
 DEVICE_INFO_CHARS = {
     "model": "00002a24-0000-1000-8000-00805f9b34fb",
@@ -169,6 +170,24 @@ class MiBand2021:
         level = raw[1] if len(raw) > 1 else None
         status = "charging" if len(raw) > 2 and raw[2] != 0 else "normal"
         return {"raw": raw.hex(), "level": level, "status": status}
+
+    async def _write(self, uuid: str, data: bytes):
+        try:
+            await self.client.write_gatt_char(uuid, data, response=False)
+        except Exception:
+            await self.client.write_gatt_char(uuid, data, response=True)
+
+    async def vibrate(self, seconds: float = 2.0, repeats: int = 1):
+        """Make the band vibrate ("find device").
+
+        Writes ALERT_LEVEL=3 (vibrate only) and then ALERT_LEVEL=0 (none) to
+        stop, exactly like Gadgetbridge's find-device command.
+        """
+        for _ in range(max(1, repeats)):
+            await self._write(ALERT_LEVEL, bytes([0x03]))
+            await asyncio.sleep(seconds)
+            await self._write(ALERT_LEVEL, bytes([0x00]))
+            await asyncio.sleep(0.3)
 
     async def read_device_info(self):
         info = {}

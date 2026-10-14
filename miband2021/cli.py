@@ -51,6 +51,10 @@ async def run(args) -> int:
             info = await band.read_device_info()
             for k, v in info.items():
                 print("    %-9s = %s" % (k, v))
+        if args.vibrate:
+            print("[*] vibrating for %.1fs ..." % args.vibrate_seconds)
+            await band.vibrate(seconds=args.vibrate_seconds, repeats=args.vibrate_repeats)
+            print("[+] done")
         return 0
     except Exception as exc:  # noqa: BLE001
         print("[-] %s: %s" % (type(exc).__name__, exc))
@@ -68,6 +72,11 @@ def main() -> int:
     p.add_argument("--key-hex", help="auth key as hex (or set MI_BAND_AUTH_KEY)")
     p.add_argument("--key-file", default="auth_key.txt", help="file with the hex auth key")
     p.add_argument("--info", action="store_true", help="also read the device info service")
+    p.add_argument("--vibrate", action="store_true", help="make the band vibrate (find device)")
+    p.add_argument("--vibrate-seconds", type=float, default=2.0,
+                   help="how long to vibrate (default 2.0)")
+    p.add_argument("--vibrate-repeats", type=int, default=1,
+                   help="number of vibration bursts (default 1)")
     return asyncio.run(run(p.parse_args()))
 
 
