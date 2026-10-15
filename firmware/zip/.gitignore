@@ -1,0 +1,2 @@
+# device-specific secret - never commit
+AUTH_KEY.txt

@@ -4,3 +4,8 @@ auth_key.txt
 .venv/
 venv/
 .uv/
+
+# local hand-off bundle (contains the device Auth Key) - never commit
+firmware/MiBand6-RE-kit.zip
+firmware/zip/*.zip
+.DS_Store
